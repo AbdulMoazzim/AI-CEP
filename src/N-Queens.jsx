@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, RotateCcw, Pause, SkipForward, FastForward } from 'lucide-react';
+import { Play, RotateCcw, Pause, SkipForward, BarChart3 } from 'lucide-react';
 
 const NQueensVisualizer = () => {
   const [n, setN] = useState(8);
@@ -10,6 +10,9 @@ const NQueensVisualizer = () => {
   const [stepCount, setStepCount] = useState(0);
   const [speed, setSpeed] = useState(500);
   const [isPaused, setIsPaused] = useState(false);
+  const [stats, setStats] = useState({ iterations: 0, startTime: 0, endTime: 0, success: false });
+  const [showComparison, setShowComparison] = useState(false);
+  const [comparisonResults, setComparisonResults] = useState([]);
   const solverRef = useRef(null);
   const pausedRef = useRef(false);
 
@@ -24,6 +27,7 @@ const NQueensVisualizer = () => {
     setSolving(false);
     setIsPaused(false);
     pausedRef.current = false;
+    setStats({ iterations: 0, startTime: 0, endTime: 0, success: false });
     if (solverRef.current) {
       solverRef.current.stop = true;
     }
@@ -49,6 +53,7 @@ const NQueensVisualizer = () => {
     setBoard(newBoard.map(row => [...row]));
     setMessage(msg);
     setStepCount(prev => prev + 1);
+    setStats(prev => ({ ...prev, iterations: prev.iterations + 1 }));
     await sleep(speed);
     return !solverRef.current?.stop;
   };
@@ -92,7 +97,7 @@ const NQueensVisualizer = () => {
           boardState[row][col] = true;
           const cont = await updateBoard(
             boardState, 
-            `Placing queen at Row ${row + 1}, Column ${col + 1}`
+            `CSP: Placing queen at Row ${row + 1}, Column ${col + 1}`
           );
           if (!cont) return false;
 
@@ -104,7 +109,7 @@ const NQueensVisualizer = () => {
           boardState[row][col] = false;
           const cont2 = await updateBoard(
             boardState, 
-            `Backtracking from Row ${row + 1}, Column ${col + 1}`
+            `CSP: Backtracking from Row ${row + 1}, Column ${col + 1}`
           );
           if (!cont2) return false;
           currentDomain = savedDomain;
@@ -117,6 +122,7 @@ const NQueensVisualizer = () => {
     if (!result && !solverRef.current?.stop) {
       setMessage('No solution found.');
     }
+    return result;
   };
 
   // DFS Backtracking Algorithm (Animated)
@@ -149,7 +155,7 @@ const NQueensVisualizer = () => {
           
           const cont = await updateBoard(
             boardState, 
-            `Trying queen at Row ${row + 1}, Column ${col + 1}`
+            `DFS: Trying queen at Row ${row + 1}, Column ${col + 1}`
           );
           if (!cont) return false;
 
@@ -160,7 +166,7 @@ const NQueensVisualizer = () => {
           
           const cont2 = await updateBoard(
             boardState, 
-            `Backtracking from Row ${row + 1}, Column ${col + 1}`
+            `DFS: Backtracking from Row ${row + 1}, Column ${col + 1}`
           );
           if (!cont2) return false;
         }
@@ -172,6 +178,7 @@ const NQueensVisualizer = () => {
     if (!result && !solverRef.current?.stop) {
       setMessage('No solution found.');
     }
+    return result;
   };
 
   const handleSolve = async () => {
@@ -182,12 +189,18 @@ const NQueensVisualizer = () => {
     setStepCount(0);
     setMessage('Starting...');
     
+    const startTime = performance.now();
+    setStats({ iterations: 0, startTime, endTime: 0, success: false });
+    
+    let success = false;
     if (algorithm === 'csp') {
-      await solveCSPAnimated();
+      success = await solveCSPAnimated();
     } else {
-      await solveDFSAnimated();
+      success = await solveDFSAnimated();
     }
     
+    const endTime = performance.now();
+    setStats(prev => ({ ...prev, endTime, success }));
     setSolving(false);
   };
 
@@ -205,11 +218,103 @@ const NQueensVisualizer = () => {
     pausedRef.current = false;
   };
 
+  // Non-animated versions for comparison
+  const solveCSPFast = (size) => {
+    let iterations = 0;
+    let boardState = Array.from({ length: size }, () => Array(size).fill(false));
+    let domain = Array.from({ length: size }, () => Array.from({ length: size }, (_, j) => j));
+
+    const propagateConstraints = (rRow, col, currentDomain) => {
+      let newDomain = currentDomain.map(d => [...d]);
+      for (let j = 0; j < size; j++) {
+        if (col !== j) newDomain[j] = newDomain[j].filter(x => x !== rRow);
+      }
+      for (let k = 0; k < size; k++) {
+        if (col !== k) {
+          let diff = Math.abs(col - k);
+          newDomain[k] = newDomain[k].filter(x => x !== rRow - diff && x !== rRow + diff);
+        }
+      }
+      return newDomain;
+    };
+
+    const solve = (col, currentDomain) => {
+      iterations++;
+      if (col === size) return true;
+      for (let row of currentDomain[col]) {
+        if (!boardState[row][col]) {
+          boardState[row][col] = true;
+          let savedDomain = currentDomain.map(d => [...d]);
+          let newDomain = propagateConstraints(row, col, currentDomain);
+          if (solve(col + 1, newDomain)) return true;
+          boardState[row][col] = false;
+          currentDomain = savedDomain;
+        }
+      }
+      return false;
+    };
+
+    const startTime = performance.now();
+    const success = solve(0, domain);
+    const endTime = performance.now();
+    return { success, iterations, runtime: endTime - startTime };
+  };
+
+  const solveDFSFast = (size) => {
+    let iterations = 0;
+    const queenPositions = new Array(size).fill(-1);
+
+    const isSafe = (row, col) => {
+      for (let i = 0; i < row; i++) {
+        if (queenPositions[i] === col) return false;
+        if (Math.abs(queenPositions[i] - col) === Math.abs(i - row)) return false;
+      }
+      return true;
+    };
+
+    const dfs = (row) => {
+      iterations++;
+      if (row === size) return true;
+      for (let col = 0; col < size; col++) {
+        if (isSafe(row, col)) {
+          queenPositions[row] = col;
+          if (dfs(row + 1)) return true;
+          queenPositions[row] = -1;
+        }
+      }
+      return false;
+    };
+
+    const startTime = performance.now();
+    const success = dfs(0);
+    const endTime = performance.now();
+    return { success, iterations, runtime: endTime - startTime };
+  };
+
+  const runComparison = () => {
+    const testSizes = [4, 8, 12];
+    const results = [];
+
+    testSizes.forEach(size => {
+      const cspResult = solveCSPFast(size);
+      const dfsResult = solveDFSFast(size);
+
+      results.push({
+        n: size,
+        csp: cspResult,
+        dfs: dfsResult
+      });
+    });
+
+    setComparisonResults(results);
+    setShowComparison(true);
+  };
+
   const cellSize = Math.min(500 / n, 50);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2 text-center">
             N-Queens Solver
@@ -274,13 +379,22 @@ const NQueensVisualizer = () => {
 
           <div className="flex gap-4 mb-8">
             {!solving ? (
-              <button
-                onClick={handleSolve}
-                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                <Play size={20} />
-                Solve
-              </button>
+              <>
+                <button
+                  onClick={handleSolve}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <Play size={20} />
+                  Solve
+                </button>
+                <button
+                  onClick={runComparison}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <BarChart3 size={20} />
+                  Compare Algorithms
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -316,6 +430,28 @@ const NQueensVisualizer = () => {
             </div>
           </div>
 
+          {/* Current Run Statistics */}
+          {stats.endTime > 0 && (
+            <div className="mb-6 grid grid-cols-3 gap-4">
+              <div className="bg-green-50 p-4 rounded-lg border-2 border-green-200">
+                <p className="text-sm text-gray-600">Success Rate</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {stats.success ? '100%' : '0%'}
+                </p>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-200">
+                <p className="text-sm text-gray-600">Iterations</p>
+                <p className="text-2xl font-bold text-blue-600">{stats.iterations}</p>
+              </div>
+              <div className="bg-purple-50 p-4 rounded-lg border-2 border-purple-200">
+                <p className="text-sm text-gray-600">Runtime</p>
+                <p className="text-2xl font-bold text-purple-600">
+                  {(stats.endTime - stats.startTime).toFixed(2)}ms
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-center mb-8">
             <div
               className="inline-grid gap-0 border-4 border-gray-800 rounded-lg overflow-hidden shadow-lg"
@@ -345,6 +481,96 @@ const NQueensVisualizer = () => {
               )}
             </div>
           </div>
+
+          {/* Comparison Results */}
+          {showComparison && comparisonResults.length > 0 && (
+            <div className="mb-8 p-6 bg-gray-50 rounded-lg border-2 border-gray-200">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-2xl font-bold text-gray-800">Algorithm Comparison</h3>
+                <button
+                  onClick={() => setShowComparison(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-200">
+                      <th className="p-3 font-semibold border">N-Queens</th>
+                      <th className="p-3 font-semibold border" colSpan="3">CSP with Constraint Propagation</th>
+                      <th className="p-3 font-semibold border" colSpan="3">DFS Backtracking</th>
+                    </tr>
+                    <tr className="bg-gray-100">
+                      <th className="p-3 border">Size</th>
+                      <th className="p-3 border">Success</th>
+                      <th className="p-3 border">Iterations</th>
+                      <th className="p-3 border">Runtime (ms)</th>
+                      <th className="p-3 border">Success</th>
+                      <th className="p-3 border">Iterations</th>
+                      <th className="p-3 border">Runtime (ms)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparisonResults.map((result, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="p-3 border font-semibold">{result.n}</td>
+                        <td className="p-3 border">
+                          <span className={`font-semibold ${result.csp.success ? 'text-green-600' : 'text-red-600'}`}>
+                            {result.csp.success ? '✓ Yes' : '✗ No'}
+                          </span>
+                        </td>
+                        <td className="p-3 border">{result.csp.iterations}</td>
+                        <td className="p-3 border">{result.csp.runtime.toFixed(3)}</td>
+                        <td className="p-3 border">
+                          <span className={`font-semibold ${result.dfs.success ? 'text-green-600' : 'text-red-600'}`}>
+                            {result.dfs.success ? '✓ Yes' : '✗ No'}
+                          </span>
+                        </td>
+                        <td className="p-3 border">{result.dfs.iterations}</td>
+                        <td className="p-3 border">{result.dfs.runtime.toFixed(3)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                <h4 className="font-bold text-gray-800">Analysis:</h4>
+                
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="bg-white p-4 rounded-lg border">
+                    <h5 className="font-semibold text-purple-600 mb-2">CSP with Constraint Propagation</h5>
+                    <ul className="text-sm text-gray-700 space-y-1">
+                      <li>✓ Fewer iterations due to domain pruning</li>
+                      <li>✓ More efficient for larger board sizes</li>
+                      <li>✓ Intelligent constraint elimination</li>
+                      <li>• Uses forward checking</li>
+                    </ul>
+                  </div>
+                  
+                  <div className="bg-white p-4 rounded-lg border">
+                    <h5 className="font-semibold text-blue-600 mb-2">DFS Backtracking</h5>
+                    <ul className="text-sm text-gray-700 space-y-1">
+                      <li>• More iterations needed</li>
+                      <li>• Simple and straightforward approach</li>
+                      <li>• Checks constraints after placement</li>
+                      <li>• Pure brute-force with backtracking</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-700">
+                    <strong>Efficiency Winner:</strong> CSP typically performs better due to intelligent pruning, 
+                    reducing the search space significantly. DFS explores more possibilities before finding solutions.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="p-6 bg-gray-50 rounded-lg">
             <h3 className="font-bold text-gray-800 mb-3">Algorithm Details:</h3>
